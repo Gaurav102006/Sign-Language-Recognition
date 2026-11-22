@@ -1,0 +1,176 @@
+{
+  "dataset_metadata": {
+    "total_samples": 4740,
+    "sequence_length": 25,
+    "feature_dim": 126,
+    "num_classes": 98,
+    "min_samples_per_class": 18,
+    "max_samples_per_class": 90,
+    "mean_samples_per_class": 48.36734693877551,
+    "class_names_sample": [
+      "afternoon",
+      "angry",
+      "answer",
+      "apple",
+      "baby",
+      "bad",
+      "bank",
+      "bathroom",
+      "bed",
+      "bike"
+    ]
+  },
+  "unit_1_scratch_mlp": {
+    "accuracy": 0.1279887482419128,
+    "parameters": {
+      "weights": 415744,
+      "biases": 226,
+      "total": 415970
+    }
+  },
+  "unit_1_svd": {
+    "n_samples": 82950,
+    "n_features": 126,
+    "condition_number": 130.88210875770315,
+    "top_10_singular_values": [
+      505.01086672994506,
+      398.25556160689905,
+      334.22699374009983,
+      270.02350946045556,
+      167.49600391537817,
+      162.77188092759542,
+      142.02949234270167,
+      117.53574651213697,
+      107.15764966456997,
+      89.54345125405838
+    ],
+    "compression_benchmarks": [
+      {
+        "k": 4,
+        "variance_retained_pct": 80.77,
+        "relative_frobenius_error": 0.4386,
+        "compression_ratio": 31.5
+      },
+      {
+        "k": 8,
+        "variance_retained_pct": 92.72,
+        "relative_frobenius_error": 0.2698,
+        "compression_ratio": 15.75
+      },
+      {
+        "k": 16,
+        "variance_retained_pct": 98.03,
+        "relative_frobenius_error": 0.1404,
+        "compression_ratio": 7.88
+      },
+      {
+        "k": 32,
+        "variance_retained_pct": 99.55,
+        "relative_frobenius_error": 0.0672,
+        "compression_ratio": 3.94
+      },
+      {
+        "k": 64,
+        "variance_retained_pct": 99.86,
+        "relative_frobenius_error": 0.0375,
+        "compression_ratio": 1.97
+      },
+      {
+        "k": 126,
+        "variance_retained_pct": 100.0,
+        "relative_frobenius_error": 0.0,
+        "compression_ratio": 1.0
+      }
+    ]
+  },
+  "unit_2_grad_check": {
+    "total_parameters": 664,
+    "checked_parameters": 30,
+    "relative_error": 3.491342245190228e-10,
+    "max_abs_diff": 3.5170900913872316e-11,
+    "passed": true,
+    "status": "PASSED (Gradients Verified)",
+    "sample_analytical": [
+      -0.008222923491223864,
+      -0.009954588951507555,
+      -0.0007576277165133018,
+      -0.03488062051786555,
+      -0.008211621057480278
+    ],
+    "sample_numerical": [
+      -0.008222923475464938,
+      -0.009954588930938257,
+      -0.0007576277161192023,
+      -0.0348806205252572,
+      -0.008211621072007347
+    ]
+  },
+  "unit_3_grad_flow": {
+    "sigmoid": [
+      0.0,
+      1e-06,
+      3e-06,
+      1.6e-05,
+      7.7e-05,
+      0.000311,
+      0.001288,
+      0.00539
+    ],
+    "tanh": [
+      0.005439,
+      0.007487,
+      0.009229,
+      0.012817,
+      0.013553,
+      0.014932,
+      0.017708,
+      0.020739
+    ],
+    "relu": [
+      0.003103,
+      0.004392,
+      0.005873,
+      0.007904,
+      0.010665,
+      0.013649,
+      0.016623,
+      0.018711
+    ],
+    "leaky_relu": [
+      0.002504,
+      0.003481,
+      0.004473,
+      0.005812,
+      0.007845,
+      0.010087,
+      0.013259,
+      0.016312
+    ]
+  },
+  "unit_4_vision_benchmark": {
+    "SignResNet": {
+      "accuracy": 0.9339,
+      "macro_precision": 0.9444,
+      "macro_recall": 0.9303,
+      "macro_f1": 0.9299,
+      "avg_latency_ms": 0.523,
+      "fps": 1912.9,
+      "param_count": 486242
+    },
+    "SignYOLODetector": {
+      "accuracy": 0.6048,
+      "macro_precision": 0.6017,
+      "macro_recall": 0.5702,
+      "macro_f1": 0.536,
+      "avg_latency_ms": 0.166,
+      "fps": 6024.0,
+      "param_count": 235340
+    }
+  },
+  "unit_5_sequence_generative": {
+    "bilstm_accuracy": 0.5471,
+    "transformer_accuracy": 0.6104,
+    "vae_latent_dim": 16,
+    "synthetic_samples_generated": 5
+  }
+}
