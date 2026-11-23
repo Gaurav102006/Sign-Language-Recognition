@@ -188,99 +188,86 @@ class SignInferenceEngine:
         self, sequence: np.ndarray, model_type: str = "ResNet (Deep Learning)"
     ) -> Tuple[str, float, List[Tuple[str, float]]]:
         """
-        Runs multi-class sign recognition on a (25, 126) sequence.
-        
-        Args:
-            sequence: array of shape (25, 126) or list of frames
-            model_type: "ResNet (Deep Learning)", "LSTM (Deep Learning)",
-                        "Random Forest (Machine Learning)", or "Ensemble (DL + ML)"
-        Returns:
-            (top_class_name, confidence, top5_candidates)
+        Predict one 25-frame landmark sequence.
+
+        Important: use the same canonical camera orientation used by landmark
+        extraction. Do not select the most confident result from artificial
+        flips/swaps, because that can turn an incorrect class into a confident
+        prediction.
         """
         seq = np.asarray(sequence, dtype=np.float32)
-        if seq.ndim == 2 and seq.shape[0] < self.seq_len:
-            # Pad sequence if needed
+
+        if seq.ndim != 2 or seq.shape[1] != 126:
+            raise ValueError("Expected landmark sequence with shape (frames, 126).")
+
+        if not np.isfinite(seq).all():
+            raise ValueError("Landmark sequence contains NaN or infinite values.")
+
+        if seq.shape[0] > self.seq_len:
+            indices = np.linspace(0, seq.shape[0] - 1, self.seq_len).round().astype(int)
+            seq = seq[indices]
+        elif seq.shape[0] < self.seq_len:
             pad = np.zeros((self.seq_len - seq.shape[0], 126), dtype=np.float32)
             seq = np.vstack([seq, pad])
 
-        # Try all 4 candidate orientations to handle any camera angle / mirror situation:
-        #   1. Original as-is
-        #   2. Swap left ↔ right hand slots  (fixes handedness label inversion)
-        #   3. Negate x-axis of all landmarks (fixes horizontal camera mirror flip)
-        #   4. Mirror + swap slots            (combined fix for mirrored+swapped camera)
+        cand_batch = np.expand_dims(seq, axis=0)
 
-        # Orientation 1: original
-        candidates = [seq]
+        if "ResNet" in model_type:
+            model = self.get_resnet_model()
+            with torch.no_grad():
+                tensor_in = torch.from_numpy(cand_batch).float()
+                logits = model(tensor_in)
+                probs = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
 
-        # Orientation 2: swap left ↔ right hand slots
-        swapped = np.empty_like(seq)
-        swapped[:, :63] = seq[:, 63:]
-        swapped[:, 63:] = seq[:, :63]
-        candidates.append(swapped)
+        elif "LSTM" in model_type:
+            model = self.get_lstm_model()
+            if model is None:
+                return self.predict_sequence(seq, "ResNet (Deep Learning)")
+            probs = np.asarray(model.predict(cand_batch, verbose=0)[0], dtype=np.float32)
 
-        # Orientation 3: negate x-coordinate of every landmark (horizontal mirror)
-        # Landmarks are stored as (x, y, z) triples → x is at indices 0, 3, 6, ...
-        mirrored = seq.copy()
-        mirrored[:, 0::3] = -mirrored[:, 0::3]
-        candidates.append(mirrored)
+        elif "Random Forest" in model_type:
+            ml_clf = self.get_ml_model()
+            features = ml_clf.extract_features(seq).reshape(1, -1)
+            raw_probs = ml_clf.model.predict_proba(features)[0]
+            model_classes = list(ml_clf.classes)
+            probs = np.zeros(len(self.classes), dtype=np.float32)
+            class_to_index = {str(name): i for i, name in enumerate(self.classes)}
+            for i, name in enumerate(model_classes):
+                if str(name) in class_to_index:
+                    probs[class_to_index[str(name)]] = float(raw_probs[i])
 
-        # Orientation 4: mirror + swap
-        mirrored_swapped = np.empty_like(mirrored)
-        mirrored_swapped[:, :63] = mirrored[:, 63:]
-        mirrored_swapped[:, 63:] = mirrored[:, :63]
-        candidates.append(mirrored_swapped)
+        else:
+            resnet = self.get_resnet_model()
+            with torch.no_grad():
+                tensor_in = torch.from_numpy(cand_batch).float()
+                logits = resnet(tensor_in)
+                p_dl = torch.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
 
-        best_probs = None
-        best_conf = -1.0
+            ml_clf = self.get_ml_model()
+            features = ml_clf.extract_features(seq).reshape(1, -1)
+            raw_ml = ml_clf.model.predict_proba(features)[0]
+            model_classes = list(ml_clf.classes)
+            p_ml = np.zeros(len(self.classes), dtype=np.float32)
+            class_to_index = {str(name): i for i, name in enumerate(self.classes)}
+            for i, name in enumerate(model_classes):
+                if str(name) in class_to_index:
+                    p_ml[class_to_index[str(name)]] = float(raw_ml[i])
+            probs = 0.55 * p_dl + 0.45 * p_ml
 
-        for cand in candidates:
-            cand_batch = np.expand_dims(cand, axis=0)
+        probs = np.asarray(probs, dtype=np.float32).reshape(-1)
+        if len(probs) != len(self.classes):
+            raise ValueError(
+                "Model output count does not match classes.npy. Check model and class-label files."
+            )
 
-            if "ResNet" in model_type:
-                resnet = self.get_resnet_model()
-                with torch.no_grad():
-                    tensor_in = torch.from_numpy(cand_batch).float()
-                    logits = resnet(tensor_in)
-                    # Temperature scaling T=0.7 for sharper confidence
-                    p = torch.softmax(logits / 0.7, dim=-1).squeeze().numpy()
+        if not np.isfinite(probs).all() or float(np.sum(probs)) <= 0:
+            raise ValueError("Model returned invalid prediction probabilities.")
 
-            elif "LSTM" in model_type:
-                lstm = self.get_lstm_model()
-                if lstm is not None:
-                    p = lstm.predict(cand_batch, verbose=0)[0]
-                else:
-                    return self.predict_sequence(sequence, "ResNet (Deep Learning)")
-
-            elif "Random Forest" in model_type:
-                ml_clf = self.get_ml_model()
-                feats = ml_clf.extract_features(cand).reshape(1, -1)
-                p = ml_clf.model.predict_proba(feats)[0]
-
-            else:  # Ensemble (Voting DL ResNet + ML Random Forest)
-                resnet = self.get_resnet_model()
-                with torch.no_grad():
-                    tensor_in = torch.from_numpy(cand_batch).float()
-                    p_dl = torch.softmax(resnet(tensor_in) / 0.7, dim=-1).squeeze().numpy()
-
-                ml_clf = self.get_ml_model()
-                feats = ml_clf.extract_features(cand).reshape(1, -1)
-                p_ml = ml_clf.model.predict_proba(feats)[0]
-
-                p = 0.55 * p_dl + 0.45 * p_ml
-
-            max_p = float(np.max(p))
-            if max_p > best_conf:
-                best_conf = max_p
-                best_probs = p
-
-        probs = best_probs if best_probs is not None else np.zeros(self.n_classes)
-
-        # Calculate top-5
+        probs = probs / np.sum(probs)
         top_indices = np.argsort(probs)[-5:][::-1]
         best_idx = int(top_indices[0])
-        top_conf = float(probs[best_idx])
         top_class = str(self.classes[best_idx])
+        top_conf = float(probs[best_idx])
         top5 = [(str(self.classes[i]), float(probs[i])) for i in top_indices]
 
         return top_class, top_conf, top5
-
