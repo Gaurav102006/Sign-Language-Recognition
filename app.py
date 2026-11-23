@@ -195,12 +195,9 @@ with col_left:
         with c_cam2:
             auto_add = st.checkbox("⚡ Auto-add steady signs (1.2s)", value=True, help="Automatically adds sign when held steady.")
 
-        # video on the left, detected word on the right (side by side)
-        c_vid, c_det = st.columns([1.5, 1])
-        with c_vid:
-            video_placeholder = st.empty()
-        with c_det:
-            live_panel = st.empty()
+        # Keep the detected word directly below the webcam preview.
+        video_placeholder = st.empty()
+        live_panel = st.empty()
 
         def render_live_panel(word, conf, top5, hands, buffered, steady):
             """Big, clear live-detection card shown right under the video."""
@@ -236,11 +233,11 @@ with col_left:
             else:
                 frame_buffer = deque(maxlen=120)  # (timestamp, landmarks)
                 WINDOW_SEC = 2.5  # training clips were sampled across the whole clip, not 0.8 s
-                recent_preds = deque(maxlen=6)
+                recent_preds = deque(maxlen=7)
                 last_auto_added = ""
                 last_add_time = 0.0
                 frame_i = 0
-                last_top5, last_word, last_conf, last_steady = [], "", 0.0, False
+                last_top5, last_word, last_conf, last_steady = [], "", 0.0, False\n                last_inference_frame = -1
 
                 while run_live:
                     ret, frame = cap.read()
@@ -268,37 +265,40 @@ with col_left:
                     cur_word = "Raise hand..." if hands_count == 0 else "Analyzing gesture..."
                     cur_conf = 0.0
 
-                    if len(frame_buffer) >= 20 and hands_count > 0:
-                        # Resample the window to 25 evenly spaced frames, like the training data
+                    if len(frame_buffer) >= 25 and hands_count > 0:
+                        # Sample the latest visible-hand window into the model's 25-frame input.
                         idxs = np.linspace(0, len(frame_buffer) - 1, 25).round().astype(int)
                         seq = np.array([frame_buffer[i][1] for i in idxs], dtype=np.float32)
-                        # predict every 2nd frame to keep the video smooth
-                        if frame_i % 2 == 0 or not last_top5:
+
+                        # Add a vote only when a fresh model prediction is produced.
+                        if frame_i - last_inference_frame >= 4:
                             p_word, p_conf, last_top5 = engine.predict_sequence(seq, model_choice)
                             last_word, last_conf = p_word, p_conf
-                        p_word, p_conf = last_word, last_conf
+                            last_inference_frame = frame_i
+                            recent_preds.append((p_word, p_conf))
+
                         last_steady = False
+                        if recent_preds:
+                            counts = Counter(word for word, score in recent_preds if score >= 0.40)
+                            if counts:
+                                top_word, count = counts.most_common(1)[0]
+                                matching_scores = [score for word, score in recent_preds if word == top_word]
+                                cur_conf = float(np.mean(matching_scores))
+                                # Require repeated agreement and a usable model score.
+                                last_steady = count >= 4 and cur_conf >= 0.40
 
-                        if p_conf >= 0.35:
-                            cur_word = p_word
-                            cur_conf = p_conf
-                            recent_preds.append(p_word)
+                                if last_steady:
+                                    last_word = top_word
+                                    cur_word = top_word
+                                    st.session_state.live_detected_word = top_word
+                                    st.session_state.live_detected_conf = cur_conf
 
-                            # Stability check: 3 of last 6 frames agree
-                            counts = Counter(recent_preds)
-                            top_word, count = counts.most_common(1)[0]
-                            st.session_state.live_detected_word = top_word
-                            st.session_state.live_detected_conf = cur_conf
-                            last_steady = count >= 3
-                            last_word = top_word
-
-                            # Auto-add if enabled and held steady
-                            now = time.time()
-                            if auto_add and count >= 3 and top_word != last_auto_added and (now - last_add_time > 1.2):
-                                last_auto_added = top_word
-                                last_add_time = now
-                                if not st.session_state.words or st.session_state.words[-1] != top_word:
-                                    st.session_state.words.append(top_word)
+                                    now = time.time()
+                                    if auto_add and top_word != last_auto_added and (now - last_add_time > 1.2):
+                                        last_auto_added = top_word
+                                        last_add_time = now
+                                        if not st.session_state.words or st.session_state.words[-1] != top_word:
+                                            st.session_state.words.append(top_word)
 
                     # HUD on frame: big RED detected word (black outline so it is readable anywhere)
                     hud_word = last_word.upper() if (hands_count > 0 and last_top5) else ("SHOW HAND" if hands_count == 0 else "...")
