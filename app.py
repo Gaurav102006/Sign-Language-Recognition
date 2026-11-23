@@ -209,7 +209,7 @@ with col_left:
             elif not top5:
                 head, sub, color = "Collecting frames...", f"{buffered} frames buffered", "#64748B"
             elif steady:
-                head, sub, color = word.upper(), f"Confidence {conf*100:.0f}%", "#16A34A"
+                head, sub, color = word.upper(), f"Confidence {conf*100:.0f}%", "#EF4444"
             else:
                 head, sub, color = "Not sure yet", f"Best guess: {word.upper()} ({conf*100:.0f}%)", "#D97706"
             rows = ""
@@ -300,21 +300,17 @@ with col_left:
                                 if not st.session_state.words or st.session_state.words[-1] != top_word:
                                     st.session_state.words.append(top_word)
 
-                    # HUD on frame
-                    cv2.putText(
-                        annotated_frame,
-                        f"SIGN: {cur_word.upper()} ({cur_conf*100:.0f}%)",
-                        (20, 45),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1.0,
-                        (56, 189, 248),
-                        2,
-                        cv2.LINE_AA,
-                    )
+                    # HUD on frame: big RED detected word (black outline so it is readable anywhere)
+                    hud_word = last_word.upper() if (hands_count > 0 and last_top5) else ("SHOW HAND" if hands_count == 0 else "...")
+                    hud_text = f"{hud_word}  {last_conf*100:.0f}%" if (hands_count > 0 and last_top5) else hud_word
+                    (tw, th), _ = cv2.getTextSize(hud_text, cv2.FONT_HERSHEY_DUPLEX, 1.8, 4)
+                    cv2.rectangle(annotated_frame, (10, 10), (30 + tw, 40 + th), (255, 255, 255), -1)
+                    cv2.putText(annotated_frame, hud_text, (20, 25 + th), cv2.FONT_HERSHEY_DUPLEX, 1.8, (0, 0, 0), 8, cv2.LINE_AA)
+                    cv2.putText(annotated_frame, hud_text, (20, 25 + th), cv2.FONT_HERSHEY_DUPLEX, 1.8, (0, 0, 255), 4, cv2.LINE_AA)
                     cv2.putText(
                         annotated_frame,
                         f"Hands: {hands_count} | Buffered frames: {len(frame_buffer)} (last {WINDOW_SEC:.1f}s)",
-                        (20, 80),
+                        (20, 110),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
                         (255, 255, 255),
