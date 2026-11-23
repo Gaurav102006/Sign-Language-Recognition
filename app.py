@@ -237,7 +237,8 @@ with col_left:
                 last_auto_added = ""
                 last_add_time = 0.0
                 frame_i = 0
-                last_top5, last_word, last_conf, last_steady = [], "", 0.0, False\n                last_inference_frame = -1
+                last_top5, last_word, last_conf, last_steady = [], "", 0.0, False
+                last_inference_frame = -1
 
                 while run_live:
                     ret, frame = cap.read()
