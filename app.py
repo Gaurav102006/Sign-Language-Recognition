@@ -159,7 +159,7 @@ with c_input_type:
         [
             "🎥 Live Webcam Stream",
             "📸 Upload or Capture Photo",
-            "🎬 Official ASL Videos Gallery (100% Reliable)",
+            "🎬 Official ASL Videos Gallery (dataset clips)",
             "📁 Custom Video File Upload",
         ],
         horizontal=True,
@@ -168,7 +168,7 @@ with c_input_type:
 with c_model_type:
     model_choice = st.selectbox(
         "Recognition Model",
-        ["Ensemble (DL + ML)", "ResNet (Deep Learning)", "Random Forest (Machine Learning)"],
+        ["ResNet (Deep Learning)", "Ensemble (DL + ML)", "Random Forest (Machine Learning)"],
         index=0,
     )
 
@@ -195,22 +195,58 @@ with col_left:
         with c_cam2:
             auto_add = st.checkbox("⚡ Auto-add steady signs (1.2s)", value=True, help="Automatically adds sign when held steady.")
 
-        video_placeholder = st.empty()
+        # video on the left, detected word on the right (side by side)
+        c_vid, c_det = st.columns([1.5, 1])
+        with c_vid:
+            video_placeholder = st.empty()
+        with c_det:
+            live_panel = st.empty()
+
+        def render_live_panel(word, conf, top5, hands, buffered, steady):
+            """Big, clear live-detection card shown right under the video."""
+            if hands == 0:
+                head, sub, color = "Show your hand", "No hand detected", "#64748B"
+            elif not top5:
+                head, sub, color = "Collecting frames...", f"{buffered} frames buffered", "#64748B"
+            elif steady:
+                head, sub, color = word.upper(), f"Confidence {conf*100:.0f}%", "#16A34A"
+            else:
+                head, sub, color = "Not sure yet", f"Best guess: {word.upper()} ({conf*100:.0f}%)", "#D97706"
+            rows = ""
+            for w, pr in (top5 or [])[:3]:
+                rows += (
+                    f'<div style="display:flex;align-items:center;gap:10px;margin-top:6px">'
+                    f'<div style="width:110px;font-size:16px;color:#E2E8F0">{w}</div>'
+                    f'<div style="flex:1;background:#1E293B;border-radius:6px;height:14px">'
+                    f'<div style="width:{max(2, pr*100):.0f}%;background:{color};height:14px;border-radius:6px"></div></div>'
+                    f'<div style="width:48px;text-align:right;font-size:16px;color:#E2E8F0">{pr*100:.0f}%</div></div>'
+                )
+            live_panel.markdown(
+                f'<div style="background:#0F172A;border:2px solid {color};border-radius:14px;padding:16px 20px;margin-top:10px">'
+                f'<div style="font-size:15px;color:#94A3B8;letter-spacing:2px">LIVE DETECTION</div>'
+                f'<div style="font-size:40px;font-weight:700;color:{color};line-height:1.15;word-break:break-word">{head}</div>'
+                f'<div style="font-size:18px;color:#E2E8F0">{sub}</div>{rows}</div>',
+                unsafe_allow_html=True,
+            )
 
         if run_live:
             cap = cv2.VideoCapture(0)
             if not cap.isOpened():
                 st.error("Could not access webcam. Please check permissions or try 'Upload or Capture Photo'.")
             else:
-                frame_buffer = deque(maxlen=25)
+                frame_buffer = deque(maxlen=120)  # (timestamp, landmarks)
+                WINDOW_SEC = 2.5  # training clips were sampled across the whole clip, not 0.8 s
                 recent_preds = deque(maxlen=6)
                 last_auto_added = ""
                 last_add_time = 0.0
+                frame_i = 0
+                last_top5, last_word, last_conf, last_steady = [], "", 0.0, False
 
                 while run_live:
                     ret, frame = cap.read()
                     if not ret:
                         break
+                    frame_i += 1
 
                     # 1. Flip horizontally for natural mirror reflection!
                     frame = cv2.flip(frame, 1)
@@ -219,15 +255,25 @@ with col_left:
                     landmarks, annotated_frame, hands_count = engine.extract_landmarks(frame, draw_overlay=True)
 
                     # Only buffer frames when at least one hand is actually visible!
+                    now_t = time.time()
                     if hands_count > 0:
-                        frame_buffer.append(landmarks)
+                        frame_buffer.append((now_t, landmarks))
+                    while frame_buffer and now_t - frame_buffer[0][0] > WINDOW_SEC:
+                        frame_buffer.popleft()
 
                     cur_word = "Raise hand..." if hands_count == 0 else "Analyzing gesture..."
                     cur_conf = 0.0
 
                     if len(frame_buffer) >= 20 and hands_count > 0:
-                        seq = np.array(frame_buffer, dtype=np.float32)
-                        p_word, p_conf, _ = engine.predict_sequence(seq, model_choice)
+                        # Resample the window to 25 evenly spaced frames, like the training data
+                        idxs = np.linspace(0, len(frame_buffer) - 1, 25).round().astype(int)
+                        seq = np.array([frame_buffer[i][1] for i in idxs], dtype=np.float32)
+                        # predict every 2nd frame to keep the video smooth
+                        if frame_i % 2 == 0 or not last_top5:
+                            p_word, p_conf, last_top5 = engine.predict_sequence(seq, model_choice)
+                            last_word, last_conf = p_word, p_conf
+                        p_word, p_conf = last_word, last_conf
+                        last_steady = False
 
                         if p_conf >= 0.35:
                             cur_word = p_word
@@ -239,6 +285,8 @@ with col_left:
                             top_word, count = counts.most_common(1)[0]
                             st.session_state.live_detected_word = top_word
                             st.session_state.live_detected_conf = cur_conf
+                            last_steady = count >= 3
+                            last_word = top_word
 
                             # Auto-add if enabled and held steady
                             now = time.time()
@@ -261,7 +309,7 @@ with col_left:
                     )
                     cv2.putText(
                         annotated_frame,
-                        f"Hands: {hands_count} | Buffered: {len(frame_buffer)}/25",
+                        f"Hands: {hands_count} | Buffered frames: {len(frame_buffer)} (last {WINDOW_SEC:.1f}s)",
                         (20, 80),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
@@ -271,6 +319,9 @@ with col_left:
                     )
 
                     video_placeholder.image(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+                    if hands_count == 0:
+                        last_top5, last_steady = [], False
+                    render_live_panel(last_word, last_conf, last_top5, hands_count, len(frame_buffer), last_steady)
                     time.sleep(0.03)
 
                 cap.release()
@@ -341,8 +392,8 @@ with col_left:
     # -------------------------------------------------------------------------
     # OPTION 3: OFFICIAL ASL DATASET VIDEOS GALLERY (100% RELIABLE)
     # -------------------------------------------------------------------------
-    elif input_choice == "🎬 Official ASL Videos Gallery (100% Reliable)":
-        st.markdown('<div class="step-banner">🎯 Select from the 98 official ASL recorded videos in the dataset. Tested and verified for 100% accuracy.</div>', unsafe_allow_html=True)
+    elif input_choice == "🎬 Official ASL Videos Gallery (dataset clips)":
+        st.markdown('<div class="step-banner">🎯 Select from the 98 official ASL recorded videos in the dataset. These clips are part of the training data, so results here are optimistic.</div>', unsafe_allow_html=True)
         
         sel_sign_word = st.selectbox("Select Sign to Demonstrate", all_classes, index=all_classes.index("water") if "water" in all_classes else 0)
         v_folder = os.path.join("SL", sel_sign_word)
@@ -502,8 +553,8 @@ with col_left:
     # 🎯 100% VERIFIED SIGN PRESETS (BULLETPROOF DEMO FOR VIVA)
     # -------------------------------------------------------------------------
     st.divider()
-    st.markdown("#### 🎯 100% Accurate Sign Presets (Viva / Demo Showcase):")
-    st.caption("Click any preset to instantly test verified dataset gestures with 100% confidence:")
+    st.markdown("#### 🎯 Sign Presets (training-set clips, demo only):")
+    st.caption("Each preset feeds a training clip to the model; this shows the pipeline works, not real-world accuracy.")
     
     preset_cols1 = st.columns(4)
     quick_presets = [
@@ -636,4 +687,4 @@ with col_right:
                         st.audio(audio_bytes, format="audio/mp3")
 
 st.divider()
-st.caption("Sign Language Assistant &bull; MediaPipe + Deep Learning (ResNet-1D) & Classical ML (Random Forest) &bull; 99.4% Accuracy")
+st.caption("Sign Language Assistant &bull; MediaPipe + Deep Learning (ResNet-1D) & Classical ML (Random Forest) &bull; Accuracy depends on the evaluation split (see report)")
