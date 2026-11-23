@@ -187,7 +187,7 @@ with col_left:
     # OPTION 1: LIVE WEBCAM STREAM
     # -------------------------------------------------------------------------
     if input_choice == "🎥 Live Webcam Stream":
-        st.markdown('<div class="step-banner">👉 Webcam is horizontally mirrored. Hold your sign steady in view for 1.2s to capture.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="step-banner">👉 The preview is mirrored, but detection uses the raw camera view. Hold your sign steady in view for 1.2s to capture.</div>', unsafe_allow_html=True)
 
         c_cam1, c_cam2 = st.columns([1.2, 1])
         with c_cam1:
@@ -248,11 +248,15 @@ with col_left:
                         break
                     frame_i += 1
 
-                    # 1. Flip horizontally for natural mirror reflection!
-                    frame = cv2.flip(frame, 1)
-
-                    # 2. Extract landmarks with symmetrical alignment
+                    # 1. Extract landmarks from the RAW (un-mirrored) frame. The training
+                    #    videos show a signer facing the camera, so the model expects
+                    #    exactly this geometry and left/right hand labels. Mirroring the
+                    #    frame before MediaPipe swaps the hands and flips x, which is
+                    #    the main reason live detection was wrong.
                     landmarks, annotated_frame, hands_count = engine.extract_landmarks(frame, draw_overlay=True)
+
+                    # 2. Mirror only the picture shown to the user (natural selfie view)
+                    annotated_frame = cv2.flip(annotated_frame, 1)
 
                     # Only buffer frames when at least one hand is actually visible!
                     now_t = time.time()
